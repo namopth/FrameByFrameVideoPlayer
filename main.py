@@ -17,7 +17,7 @@ from PyQt5.QtMultimediaWidgets import QVideoWidget
 class VideoPlayer(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("NERV Video Analysis System")
+        self.setWindowTitle("Frame-by-Frame Video Player")
         self.setGeometry(100, 100, 900, 700)
 
         # Enable drag and drop
@@ -197,7 +197,7 @@ class VideoPlayer(QMainWindow):
         main_layout.setSpacing(10)
 
         # Add NERV header
-        nerv_header = QLabel("NERV VIDEO ANALYSIS SYSTEM")
+        nerv_header = QLabel("FRAME-BY-FRAME VIDEO PLAYER")
         nerv_header.setObjectName("nervHeaderLabel")
         nerv_header.setAlignment(Qt.AlignCenter)
         nerv_font = QFont("Courier New", 16, QFont.Bold)
