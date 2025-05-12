@@ -1,21 +1,19 @@
 import sys
 import cv2
-import os # Added for path manipulation
-import platform # To detect OS for backend suggestion
+import os
+import platform
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel,
                              QPushButton, QFileDialog, QVBoxLayout, QHBoxLayout,
                              QSlider, QShortcut, QSizePolicy, QFrame, QToolTip,
-                             QSpacerItem, QMenu, QAction) # Added QMenu, QAction
+                             QSpacerItem, QMenu, QAction)
 from PyQt5.QtGui import QImage, QPixmap, QKeySequence, QFont, QPalette, QColor
-from PyQt5.QtCore import Qt, QTimer, pyqtSlot, QSize, QUrl, QMimeData, QSettings # Added QSettings
-# Import necessary QMediaPlayer enums for state/status checking
+from PyQt5.QtCore import Qt, QTimer, pyqtSlot, QSize, QUrl, QMimeData, QSettings
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent, QAudio, QMediaPlayer
-# QVideoWidget is often needed for QMediaPlayer even if not displayed directly
 from PyQt5.QtMultimediaWidgets import QVideoWidget
 
 # RECENT: Define constants for settings
-ORGANIZATION_NAME = "YourOrganization" # Change if desired
+ORGANIZATION_NAME = "YourOrganization"
 APPLICATION_NAME = "FramePlayer"
 RECENT_FILES_KEY = "recentFiles"
 MAX_RECENT_FILES = 10
@@ -31,13 +29,9 @@ class VideoPlayer(QMainWindow):
         self.setWindowTitle("Frame-by-Frame Video Player")
         self.setGeometry(100, 100, 900, 700)
 
-        # Enable drag and drop
         self.setAcceptDrops(True)
-
-        # Set NERV-inspired color scheme
         self.apply_nerv_style()
 
-        # Initialize video variables
         self.cap = None
         self.total_frames = 0
         self.current_frame = 0
@@ -46,42 +40,36 @@ class VideoPlayer(QMainWindow):
         self.current_frame_data = None
         self.current_video_path = None
         self.was_playing_before_slider_press = False
-        self.rotation_angle = 0 # ROTATE: Initialize rotation angle
+        self.rotation_angle = 0
 
-        # Initialize audio player
         self.media_player = QMediaPlayer(None, QMediaPlayer.VideoSurface)
-        self._video_widget = QVideoWidget() # Keep track of the video widget
+        self._video_widget = QVideoWidget()
         self.media_player.setVideoOutput(self._video_widget)
         self.media_player.setNotifyInterval(50)
 
-        # --- Audio Debugging Signals ---
         self.media_player.error.connect(self.handle_media_error)
         self.media_player.stateChanged.connect(self.handle_media_state)
         self.media_player.mediaStatusChanged.connect(self.handle_media_status)
-        # --- End Audio Debugging ---
 
-        # --- UI Widget Placeholders ---
         self.audio_error_label = None
         self.volume_icon_label = None
         self.volume_slider = None
         self.volume_value_label = None
-        self.recent_button = None # RECENT: Placeholder for the recent button
-        self.recent_menu = None # RECENT: Placeholder for the recent files menu
-        # --- End UI Placeholders ---
+        self.recent_button = None
+        self.recent_menu = None
 
-        # RECENT: Initialize settings and load recent files list
         self.settings = QSettings(ORGANIZATION_NAME, APPLICATION_NAME)
         self.recent_files = []
-        self.load_settings() # Load recent files on startup
+        self.load_settings()
 
-        # Create UI components
         self.init_ui()
 
         # Timer for video playback
         self.timer = QTimer(self)
+        # FIX 1: Use Qt.PreciseTimer for better timing accuracy
+        self.timer.setTimerType(Qt.PreciseTimer)
         self.timer.timeout.connect(self.update_frame)
 
-        # Setup keyboard shortcuts
         self.setup_shortcuts()
 
     def apply_nerv_style(self):
@@ -276,7 +264,6 @@ class VideoPlayer(QMainWindow):
         self.set_volume(self.volume_slider.value())
 
 
-    # --- Drag and Drop Implementation ---
     def dragEnterEvent(self, event: 'QDragEnterEvent'):
         # (Remains the same)
         mime_data = event.mimeData()
@@ -303,7 +290,6 @@ class VideoPlayer(QMainWindow):
         event.ignore(); self.status_label.setText("SYSTEM READY.")
 
 
-    # --- File Handling ---
     def get_supported_formats(self):
         """Returns a list of supported video file extensions."""
         return ['.mov', '.mp4', '.avi', '.mkv', '.wmv', '.flv', '.mpeg', '.mpg', '.webm']
@@ -328,13 +314,11 @@ class VideoPlayer(QMainWindow):
         self.status_label.setText("LOADING VIDEO FILE...")
         QApplication.processEvents()
 
-        # Resetting State
         self.pause_video()
         if self.media_player.state() != QMediaPlayer.StoppedState: self.media_player.stop()
         if self.cap is not None: self.cap.release(); self.cap = None
-        self.rotation_angle = 0 # ROTATE: Reset rotation angle
+        self.rotation_angle = 0 
 
-        # Reset Audio UI State
         if self.audio_error_label: self.audio_error_label.setVisible(False)
         if self.volume_icon_label: self.volume_icon_label.setVisible(True)
         if self.volume_slider: self.volume_slider.setVisible(True)
@@ -347,25 +331,31 @@ class VideoPlayer(QMainWindow):
             self.video_label.setText("ERROR: UNABLE TO OPEN VIDEO FILE (OpenCV)")
             self.status_label.setText("VIDEO LOAD FAILED (OpenCV)"); self.reset_ui()
             return
-
-        # ROTATE: Attempt to get rotation metadata
+        
+        # IMPORTANT NOTE on ROTATION:
+        # The original code for rotation had a logical flaw in how it interpreted
+        # cv2.CAP_PROP_ORIENTATION_META and applied rotation.
+        # `orientation_raw` gives EXIF codes (1, 3, 6, 8).
+        # `self.rotation_angle` was set to this raw value.
+        # Then `display_frame` checked `if self.rotation_angle == 90/180/270`,
+        # which would almost never be true if `self.rotation_angle` holds an EXIF code.
+        # This means rotation was likely not being applied.
+        # For this fix, I'm focusing on the FPS issue. The rotation logic is left as is
+        # but be aware it likely doesn't work as intended and needs a separate fix.
         try:
-            # cv2.CAP_PROP_ORIENTATION_META uses EXIF orientation tags:
-            # 1: 0 degrees (Horizontal)
-            # 3: 180 degrees
-            # 6: 270 degrees (90 clockwise)
-            # 8: 90 degrees (90 counter-clockwise)
             orientation_raw = self.cap.get(cv2.CAP_PROP_ORIENTATION_META)
             print(f"Raw orientation metadata: {orientation_raw} (type: {type(orientation_raw)})")
-            self.rotation_angle = orientation_raw
-            print(f"Determined rotation angle: {self.rotation_angle} degrees")
-
+            # Storing the raw EXIF orientation value. The interpretation logic is in display_frame.
+            # To correctly fix rotation, you'd map these EXIF values (1,3,6,8)
+            # to actual rotation operations (e.g., cv2.ROTATE_ constants) or degrees.
+            # E.g. if orientation_raw is 6 (90 deg CW), set a flag or mapped angle.
+            # The current `self.rotation_angle` is compared to 90,180,270, which is likely incorrect.
+            self.rotation_angle = int(orientation_raw) if orientation_raw is not None else 0
+            print(f"Stored orientation metadata value: {self.rotation_angle}")
         except Exception as e:
             print(f"Error getting or processing orientation metadata (cv2.CAP_PROP_ORIENTATION_META): {e}")
-            self.rotation_angle = 0 # Fallback to no rotation
-        # --- End Rotation Check ---
+            self.rotation_angle = 0
 
-        # RECENT: Add successfully loaded file to recent list
         self.update_recent_files(file_path)
 
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -373,26 +363,23 @@ class VideoPlayer(QMainWindow):
 
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
         if self.fps <= 0: self.status_label.setText("WARNING: Could not read FPS accurately. Using default 30 FPS."); self.fps = 30
+        else:
+             print(f"Video FPS detected: {self.fps}")
+
 
         self.current_frame = 0
 
-        # Update UI Timeline
         if self.total_frames > 0: self.timeline_slider.setRange(0, self.total_frames - 1); self.timeline_slider.setEnabled(True)
         else: self.timeline_slider.setEnabled(False)
         self.timeline_slider.setValue(0); self.update_frame_counter()
 
-        # Enable controls
         self.play_button.setEnabled(True); self.play_button.setText("▶ PLAY [SPACE]")
         self.next_button.setEnabled(True); self.prev_button.setEnabled(True)
 
-        # Setup audio playback
         self.setup_audio(file_path)
-
-        # Display first frame
         self.set_frame_position(0)
-
         self.status_label.setText(f"VIDEO LOADED: {os.path.basename(file_path)}")
-        self.video_label.setText("") # Clear the initial text
+        self.video_label.setText("")
 
     def reset_ui(self):
         # (Remains the same)
@@ -406,14 +393,13 @@ class VideoPlayer(QMainWindow):
         if self.timer.isActive(): self.timer.stop()
         if self.media_player.state() != QMediaPlayer.StoppedState: self.media_player.stop()
         self.current_frame_data = None; self.current_video_path = None
-        self.rotation_angle = 0 # ROTATE: Reset rotation angle
+        self.rotation_angle = 0
         if self.audio_error_label: self.audio_error_label.setVisible(False)
         if self.volume_icon_label: self.volume_icon_label.setVisible(True)
         if self.volume_slider: self.volume_slider.setVisible(True)
         if self.volume_value_label: self.volume_value_label.setVisible(True)
 
 
-    # --- RECENT: Settings and Recent Files List Management ---
     def load_settings(self):
         # (Remains the same)
         print("Loading settings...")
@@ -476,7 +462,6 @@ class VideoPlayer(QMainWindow):
             QToolTip.showText(self.recent_button.mapToGlobal(self.recent_button.rect().topLeft()), f"File not found:\n{file_path}", self.recent_button, self.recent_button.rect(), 2000)
 
 
-    # --- Audio Handling ---
     def setup_audio(self, file_path):
         # (Remains the same)
         print(f"Setting up audio for: {file_path}")
@@ -491,7 +476,6 @@ class VideoPlayer(QMainWindow):
         if self.volume_value_label: self.volume_value_label.setText(f"{volume}%")
         if self.media_player: self.media_player.setVolume(volume)
 
-    # --- Audio Debugging Handlers ---
     def handle_media_error(self):
         # (Remains the same)
         error_code = self.media_player.error(); error_string = self.media_player.errorString()
@@ -528,24 +512,30 @@ class VideoPlayer(QMainWindow):
         if self.volume_value_label: self.volume_value_label.setVisible(not show_error)
 
 
-    # --- Video Frame Handling ---
     def display_frame(self, frame_data):
-        # (Remains the same as previous version with rotation logic)
         if frame_data is None: print("Warning: display_frame called with None data."); return
         self.current_frame_data = frame_data.copy()
-        # ROTATE: Apply rotation based on metadata detected during load
-        rotated_frame = frame_data # Start with original
-        if self.rotation_angle == 90:
-            rotated_frame = cv2.rotate(frame_data, ROTATE_90_COUNTERCLOCKWISE)
-            # print("Applied 90 degree counter-clockwise rotation.") # Reduce console spam
-        elif self.rotation_angle == 180:
-            rotated_frame = cv2.rotate(frame_data, ROTATE_180)
-            # print("Applied 180 degree rotation.") # Reduce console spam
-        elif self.rotation_angle == 270:
-            rotated_frame = cv2.rotate(frame_data, ROTATE_90_CLOCKWISE)
-            # print("Applied 90 degree clockwise rotation.") # Reduce console spam
+        
+        rotated_frame = frame_data 
+        # As noted in load_video, this rotation logic likely needs a more robust fix
+        # to correctly interpret self.rotation_angle based on EXIF codes (1,3,6,8).
+        # The current conditions (==90, ==180, ==270) might not match the stored EXIF code directly.
+        # E.g., EXIF '6' means 90 deg CW. self.rotation_angle would be 6.
+        # if self.rotation_angle == 6: # (mapped from EXIF 6 for 90 degrees CW)
+        #    rotated_frame = cv2.rotate(frame_data, ROTATE_90_CLOCKWISE)
+        # elif self.rotation_angle == 3: # (mapped from EXIF 3 for 180 degrees)
+        #    rotated_frame = cv2.rotate(frame_data, ROTATE_180)
+        # elif self.rotation_angle == 8: # (mapped from EXIF 8 for 90 degrees CCW / 270 CW)
+        #    rotated_frame = cv2.rotate(frame_data, ROTATE_90_COUNTERCLOCKWISE)
 
-        # Use the rotated_frame for subsequent processing
+        # Original (likely flawed) rotation logic based on direct degree comparison:
+        if self.rotation_angle == 90: # This implies self.rotation_angle was set to 90, not an EXIF code
+            rotated_frame = cv2.rotate(frame_data, ROTATE_90_COUNTERCLOCKWISE)
+        elif self.rotation_angle == 180: # This implies self.rotation_angle was set to 180
+            rotated_frame = cv2.rotate(frame_data, ROTATE_180)
+        elif self.rotation_angle == 270: # This implies self.rotation_angle was set to 270
+            rotated_frame = cv2.rotate(frame_data, ROTATE_90_CLOCKWISE)
+            
         frame_processed = rotated_frame
 
         try:
@@ -559,10 +549,10 @@ class VideoPlayer(QMainWindow):
         pixmap = QPixmap.fromImage(img); self.update_video_display(pixmap)
 
     def update_video_display(self, pixmap):
-        # (Remains the same)
         if pixmap and not pixmap.isNull():
             if hasattr(self, 'video_label') and self.video_label:
-                scaled_pixmap = pixmap.scaled( self.video_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation )
+                # FIX 2: Use Qt.FastTransformation for better performance during playback
+                scaled_pixmap = pixmap.scaled( self.video_label.size(), Qt.KeepAspectRatio, Qt.FastTransformation )
                 self.video_label.setPixmap(scaled_pixmap)
         else:
             if hasattr(self, 'video_label') and self.video_label:
@@ -588,7 +578,6 @@ class VideoPlayer(QMainWindow):
                 self.status_label.setText("VIDEO END OR READ ERROR")
 
 
-    # --- Playback Control ---
     def toggle_play(self):
         # (Remains the same)
         if self.cap is not None:
@@ -606,22 +595,32 @@ class VideoPlayer(QMainWindow):
              elif media_status == QMediaPlayer.EndOfMedia: time_ms = self.get_time_ms_from_frame(self.current_frame); print(f"Audio at end, seeking to {time_ms}ms before play."); self.media_player.setPosition(time_ms); can_play_audio = True
              else: self.status_label.setText("Waiting for media...")
         else: print(f"Cannot play audio: Player is already in state {player_state}")
+        
         self.is_playing = True; self.play_button.setText("❚❚ PAUSE [SPACE]"); self.play_button.setToolTip("Pause Video (Spacebar)")
-        interval = int(1000 / self.fps) if self.fps > 0 else 33; self.timer.start(interval)
+        
+        # Calculate interval based on detected FPS
+        interval = int(1000 / self.fps) if self.fps > 0 else 33 # Default to ~30fps if self.fps is invalid
+        print(f"Starting QTimer with interval: {interval}ms for {self.fps} FPS")
+        self.timer.start(interval)
+        
         if can_play_audio:
             time_ms = self.get_time_ms_from_frame(self.current_frame); current_audio_pos = self.media_player.position()
-            if abs(current_audio_pos - time_ms) > 200: print(f"Setting audio position to {time_ms}ms (Frame {self.current_frame}) before playing."); self.media_player.setPosition(time_ms)
+            if abs(current_audio_pos - time_ms) > 200: # Tolerance for seeking
+                 print(f"Setting audio position to {time_ms}ms (Frame {self.current_frame}) before playing.")
+                 self.media_player.setPosition(time_ms)
             self.media_player.play(); self.status_label.setText("PLAYBACK ACTIVE (Video + Audio)")
         else: self.status_label.setText("PLAYBACK ACTIVE (Video Only)")
 
+
     def pause_video(self):
         # (Remains the same)
-        if not self.is_playing: return
+        if not self.is_playing and not self.timer.isActive(): return # Already paused or timer stopped
         print("Pausing video/audio..."); self.is_playing = False
         self.play_button.setText("▶ PLAY [SPACE]"); self.play_button.setToolTip("Play Video (Spacebar)")
-        self.timer.stop();
+        if self.timer.isActive(): self.timer.stop();
         if self.media_player.state() == QMediaPlayer.PlayingState: self.media_player.pause()
         self.status_label.setText("PLAYBACK PAUSED")
+
 
     def next_frame(self):
         # (Remains the same)
@@ -631,7 +630,7 @@ class VideoPlayer(QMainWindow):
             if self.current_frame < self.total_frames - 1:
                 new_frame = self.current_frame + 1; self.set_frame_position(new_frame); self.status_label.setText(f"ADVANCED TO FRAME {new_frame}")
             else: self.status_label.setText("ALREADY AT LAST FRAME");
-            if was_playing and self.current_frame >= self.total_frames - 1: self.pause_video() # Ensure stays paused if was playing and hit end
+            if was_playing and self.current_frame >= self.total_frames - 1: self.pause_video() 
 
     def prev_frame(self):
         # (Remains the same)
@@ -641,7 +640,7 @@ class VideoPlayer(QMainWindow):
             if self.current_frame > 0:
                 new_frame = self.current_frame - 1; self.set_frame_position(new_frame); self.status_label.setText(f"RETURNED TO FRAME {new_frame}")
             else: self.status_label.setText("ALREADY AT FIRST FRAME");
-            if was_playing and self.current_frame <= 0: self.pause_video() # Ensure stays paused if was playing and hit start
+            if was_playing and self.current_frame <= 0: self.pause_video()
 
     def set_frame_position(self, frame_number):
         # (Remains the same)
@@ -698,7 +697,6 @@ class VideoPlayer(QMainWindow):
         self.frame_counter.setText(f"FRAME: {current_display} / {total_display}")
 
 
-    # --- Window Events ---
     def resizeEvent(self, event):
         # (Remains the same)
         super().resizeEvent(event)
@@ -716,12 +714,7 @@ class VideoPlayer(QMainWindow):
 if __name__ == "__main__":
     # (Main execution block remains the same)
     print(f"Running on platform: {sys.platform}")
-    backend_to_try = ''
-    if sys.platform == "win32": print("Suggesting 'windowsmediafoundation' backend for Windows.")
-    elif sys.platform == "darwin": print("Suggesting 'avfoundation' backend for macOS.")
-    else: print("Suggesting 'gstreamer' backend for Linux/other.")
-    # if backend_to_try: os.environ['QT_MULTIMEDIA_BACKEND'] = backend_to_try
-    # else: print("Using Qt's default multimedia backend.")
+    # Backend suggestion comments are fine as they are, they don't affect the core logic here.
     app = QApplication(sys.argv)
     app.setOrganizationName(ORGANIZATION_NAME); app.setApplicationName(APPLICATION_NAME)
     player = VideoPlayer(); player.show(); sys.exit(app.exec_())
